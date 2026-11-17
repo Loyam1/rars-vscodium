@@ -1,0 +1,51 @@
+{
+  "name": "rars-vscodium",
+  "displayName": "RARS for VSCodium",
+  "description": "Execute RISC-V assembly with RARS from VSCodium.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Debuggers", "Other"],
+  "activationEvents": [
+    "onCommand:rarsVscodium.runActiveFile",
+    "onCommand:rarsVscodium.openGui",
+    "onCommand:rarsVscodium.configureJar"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "rarsVscodium.runActiveFile",
+        "title": "RARS: Executer le fichier actif"
+      },
+      {
+        "command": "rarsVscodium.openGui",
+        "title": "RARS: Ouvrir dans l'interface graphique"
+      },
+      {
+        "command": "rarsVscodium.configureJar",
+        "title": "RARS: Choisir le fichier JAR"
+      }
+    ],
+    "configuration": {
+      "title": "RARS for VSCodium",
+      "properties": {
+        "rarsVscodium.jarPath": {
+          "type": "string",
+          "default": "",
+          "description": "Chemin absolu ou relatif au workspace vers rars.jar."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}
