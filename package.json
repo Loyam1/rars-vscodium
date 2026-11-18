@@ -10,7 +10,13 @@
   "activationEvents": [
     "onCommand:rarsVscodium.runActiveFile",
     "onCommand:rarsVscodium.openGui",
-    "onCommand:rarsVscodium.configureJar"
+    "onCommand:rarsVscodium.configureJar",
+    "onCommand:rarsVscodium.debugActiveFile",
+    "onCommand:rarsVscodium.debugStep",
+    "onCommand:rarsVscodium.debugContinue",
+    "onCommand:rarsVscodium.debugPause",
+    "onCommand:rarsVscodium.debugStop",
+    "onCommand:rarsVscodium.toggleBreakpoint"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -26,8 +32,63 @@
       {
         "command": "rarsVscodium.configureJar",
         "title": "RARS: Choisir le fichier JAR"
+      },
+      {
+        "command": "rarsVscodium.debugActiveFile",
+        "title": "RARS: Deboguer le fichier actif",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "rarsVscodium.debugStep",
+        "title": "RARS: Pas a pas (instruction suivante)",
+        "icon": "$(debug-step-over)"
+      },
+      {
+        "command": "rarsVscodium.debugContinue",
+        "title": "RARS: Continuer l'execution",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "rarsVscodium.debugPause",
+        "title": "RARS: Pause",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "rarsVscodium.debugStop",
+        "title": "RARS: Arreter la session de debogage",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "rarsVscodium.toggleBreakpoint",
+        "title": "RARS: Basculer un point d'arret sur cette ligne",
+        "icon": "$(circle-filled)"
       }
     ],
+    "keybindings": [
+      {
+        "command": "rarsVscodium.debugContinue",
+        "key": "f5",
+        "when": "rarsVscodium.sessionActive"
+      },
+      {
+        "command": "rarsVscodium.debugStep",
+        "key": "f10",
+        "when": "rarsVscodium.sessionActive"
+      },
+      {
+        "command": "rarsVscodium.debugStop",
+        "key": "shift+f5",
+        "when": "rarsVscodium.sessionActive"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "rarsVscodium.toggleBreakpoint",
+          "when": "resourceExtname == .asm"
+        }
+      ]
+    },
     "configuration": {
       "title": "RARS for VSCodium",
       "properties": {
@@ -35,6 +96,11 @@
           "type": "string",
           "default": "",
           "description": "Chemin absolu ou relatif au workspace vers rars.jar."
+        },
+        "rarsVscodium.javaPath": {
+          "type": "string",
+          "default": "java",
+          "description": "Executable Java (11 minimum) utilise pour lancer le pont de debogage."
         }
       }
     }
