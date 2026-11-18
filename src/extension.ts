@@ -2,6 +2,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { RarsBridge, type RarsEvent } from "./rarsBridge";
 import { RarsDebugPanel } from "./debugPanel";
+import { RarsConsole } from "./rarsConsole";
 
 const CONFIGURATION_SECTION = "rarsVscodium";
 
@@ -18,6 +19,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("rarsVscodium.debugActiveFile", () => session.start()),
     vscode.commands.registerCommand("rarsVscodium.debugStep", () => session.step()),
     vscode.commands.registerCommand("rarsVscodium.debugContinue", () => session.continueRun()),
+    vscode.commands.registerCommand("rarsVscodium.debugBack", () => session.backStep()),
+    vscode.commands.registerCommand("rarsVscodium.debugLaunch", () => session.restartRun()),
     vscode.commands.registerCommand("rarsVscodium.debugPause", () => session.pause()),
     vscode.commands.registerCommand("rarsVscodium.debugStop", () => session.stop()),
     vscode.commands.registerCommand("rarsVscodium.toggleBreakpoint", () => session.toggleBreakpointAtCursor())
@@ -61,9 +64,12 @@ async function runActiveFile(gui: boolean): Promise<void> {
   }
   args.push(editor.document.uri.fsPath);
 
+  const javaPath = vscode.workspace
+    .getConfiguration(CONFIGURATION_SECTION)
+    .get<string>("javaPath", "java");
   const terminal = vscode.window.createTerminal({
     name: gui ? "RARS (interface graphique)" : "RARS",
-    shellPath: "java",
+    shellPath: javaPath,
     shellArgs: args
   });
   terminal.show();
@@ -105,8 +111,10 @@ export function deactivate(): void {
 class RarsSession implements vscode.Disposable {
   private bridge?: RarsBridge;
   private panel: RarsDebugPanel;
+  private readonly console: RarsConsole;
   private readonly breakpoints = new Map<string, Set<number>>();
   private mainFile?: string;
+  private pendingAutoContinue = false;
   private validLines: Set<number> = new Set();
   private readonly outputChannel: vscode.OutputChannel;
   private readonly currentLineDecoration: vscode.TextEditorDecorationType;
@@ -114,6 +122,10 @@ class RarsSession implements vscode.Disposable {
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.outputChannel = vscode.window.createOutputChannel("RARS");
+    this.console = new RarsConsole("RARS (console)", {
+      onLine: (line) => this.bridge?.sendInput(line),
+      onInterrupt: () => this.stop()
+    });
     this.currentLineDecoration = vscode.window.createTextEditorDecorationType({
       backgroundColor: { id: "editor.wordHighlightBackground" },
       border: "1px solid",
@@ -128,10 +140,19 @@ class RarsSession implements vscode.Disposable {
     this.panel = new RarsDebugPanel(context.extensionUri, (message) => {
       switch (message.command) {
         case "step":
+          this.panel.setRunning(true);
           this.bridge?.step();
           break;
         case "continue":
+          this.panel.setRunning(true);
           this.bridge?.continueRun();
+          break;
+        case "launch":
+          void this.restartRun();
+          break;
+        case "back":
+          this.panel.setRunning(true);
+          this.backStep();
           break;
         case "pause":
           this.bridge?.pause();
@@ -140,6 +161,8 @@ class RarsSession implements vscode.Disposable {
           this.bridge?.stop();
           break;
         case "input":
+          // Gardée pour compat : l'entree du programme passe desormais par le
+          // terminal « RARS (console) ».
           if (message.text !== undefined) {
             this.bridge?.sendInput(message.text);
           }
@@ -181,6 +204,8 @@ class RarsSession implements vscode.Disposable {
     this.disposeBridge();
     this.outputChannel.show(true);
     this.outputChannel.appendLine(`Pont RARS : ${javaPath} -cp ${jarPath} ${bridgePath}`);
+    this.console.clear();
+    this.console.show();
 
     const newBridge = new RarsBridge();
     newBridge.start(javaPath, jarPath, bridgePath);
@@ -188,6 +213,7 @@ class RarsSession implements vscode.Disposable {
     newBridge.onExit(() => {
       this.outputChannel.appendLine("Pont RARS arrete.");
       this.outputChannel.show(true);
+      this.console.message("Session de debogage fermee.");
       this.panel.status("pont arrete");
       void vscode.commands.executeCommand("setContext", "rarsVscodium.sessionActive", false);
     });
@@ -207,6 +233,27 @@ class RarsSession implements vscode.Disposable {
 
   continueRun(): void {
     this.bridge?.continueRun();
+  }
+
+  /**
+   * Relance le programme du debut : reassemblage puis execution continue.
+   * Le pont existant est reutilise s'il est vivant, sinon on redemarre tout.
+   */
+  restartRun(): void {
+    this.console.clear();
+    if (this.bridge?.alive && this.mainFile) {
+      this.pendingAutoContinue = true;
+      this.panel.status("assemblage…");
+      this.panel.setRunning(true);
+      this.bridge.assemble(this.mainFile);
+    } else {
+      void this.start();
+    }
+  }
+
+  /** Pas-a-pas arriere (historique RARS). */
+  backStep(): void {
+    this.bridge?.backStep();
   }
 
   pause(): void {
@@ -243,6 +290,7 @@ class RarsSession implements vscode.Disposable {
 
   dispose(): void {
     this.disposeBridge();
+    this.console.dispose();
     this.currentLineDecoration.dispose();
     this.breakpointDecoration.dispose();
     this.outputChannel.dispose();
@@ -267,8 +315,18 @@ class RarsSession implements vscode.Disposable {
         this.outputChannel.appendLine(
           `Assemble : ${event.file} (entree ligne ${event.entryLine})`
         );
+        if (this.pendingAutoContinue) {
+          this.pendingAutoContinue = false;
+          this.bridge?.continueRun();
+        } else {
+          this.console.message(
+            `Programme assemble (entree ligne ${event.entryLine}). F5 = continuer, F10 = pas a pas.`
+          );
+        }
         break;
       case "assembleErrors":
+        this.pendingAutoContinue = false;
+        this.panel.setRunning(false);
         for (const err of event.errors) {
           const where = err.line > 0 ? `ligne ${err.line}` : "fichier";
           this.outputChannel.appendLine(`Erreur d'assemblage [${where}] : ${err.message}`);
@@ -310,6 +368,7 @@ class RarsSession implements vscode.Disposable {
           this.outputChannel.appendLine(
             `Terminaison (${event.reason}), code de sortie ${event.exitCode}.`
           );
+          this.console.message(`Programme termine, code de sortie ${event.exitCode}.`);
         }
         if (terminated && event.line === undefined) {
           this.clearCurrentLineDecoration();
@@ -318,6 +377,9 @@ class RarsSession implements vscode.Disposable {
         }
         break;
       }
+      case "regs":
+        this.panel.updateRegs(event.registers, event.fp, event.waitingInput);
+        break;
       case "executionError":
         this.outputChannel.appendLine(`Erreur d'execution ligne ${event.line ?? "?"} : ${event.message}`);
         void vscode.window.showErrorMessage(
@@ -328,10 +390,12 @@ class RarsSession implements vscode.Disposable {
       case "output":
         if (event.stream === "err") {
           this.outputChannel.appendLine(event.text);
+          this.console.writeProgramError(event.text);
         } else {
           this.outputChannel.append(event.text);
+          this.console.writeProgram(event.text);
         }
-        this.panel.appendOutput(event.text, event.stream);
+        this.console.show();
         break;
       case "error":
         this.outputChannel.appendLine(`Pont : ${event.message}`);

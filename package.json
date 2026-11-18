@@ -14,6 +14,8 @@
     "onCommand:rarsVscodium.debugActiveFile",
     "onCommand:rarsVscodium.debugStep",
     "onCommand:rarsVscodium.debugContinue",
+    "onCommand:rarsVscodium.debugLaunch",
+    "onCommand:rarsVscodium.debugBack",
     "onCommand:rarsVscodium.debugPause",
     "onCommand:rarsVscodium.debugStop",
     "onCommand:rarsVscodium.toggleBreakpoint"
@@ -47,6 +49,16 @@
         "command": "rarsVscodium.debugContinue",
         "title": "RARS: Continuer l'execution",
         "icon": "$(debug-continue)"
+      },
+      {
+        "command": "rarsVscodium.debugLaunch",
+        "title": "RARS: Lancer depuis le debut",
+        "icon": "$(play)"
+      },
+      {
+        "command": "rarsVscodium.debugBack",
+        "title": "RARS: Pas a pas arriere",
+        "icon": "$(arrow-left)"
       },
       {
         "command": "rarsVscodium.debugPause",

@@ -43,6 +43,14 @@ export interface StoppedEvent {
   fp: Record<string, number>;
 }
 
+export interface RegsEvent {
+  type: "regs";
+  /** Vrai quand la simulation est bloquee dans une lecture (syscall 5/8/12). */
+  waitingInput?: boolean;
+  registers: Record<string, number>;
+  fp: Record<string, number>;
+}
+
 export interface ExecutionErrorEvent {
   type: "executionError";
   message: string;
@@ -68,6 +76,7 @@ export type RarsEvent =
   | BreakpointsEvent
   | BreakpointRefusedEvent
   | StoppedEvent
+  | RegsEvent
   | ExecutionErrorEvent
   | OutputEvent
   | RarsErrorEvent;
@@ -139,6 +148,11 @@ export class RarsBridge implements vscode.Disposable {
 
   step(): void {
     this.write("STEP");
+  }
+
+  /** Pas-a-pas arriere : annule la derniere instruction (historique RARS). */
+  backStep(): void {
+    this.write("BACK");
   }
 
   continueRun(): void {
