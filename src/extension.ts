@@ -232,7 +232,12 @@ class RarsSession implements vscode.Disposable {
   }
 
   continueRun(): void {
-    this.bridge?.continueRun();
+    // F5 sans session active : lance le debogage plutot que de ne rien faire.
+    if (!this.bridge?.alive) {
+      void this.start();
+      return;
+    }
+    this.bridge.continueRun();
   }
 
   /**

@@ -326,6 +326,8 @@ public class RarsBridge {
             }
             running = true;
             stopRequested = false;
+            pauseRequested = false;
+            pauseDeferred = false;
         }
         Thread t = new Thread(() -> {
             try {
@@ -397,6 +399,13 @@ public class RarsBridge {
                 Settings.Bool.SELF_MODIFYING_CODE_ENABLED, selfMod);
             if (stopRequested) {
                 sendStopped(Simulator.Reason.STOP, Globals.exitCode);
+            } else if (pauseRequested) {
+                // En RARS 1.6, pauseExecution/stopExecution depuis un autre
+                // thread met simulatorThread a null : simulate() finit sur une
+                // NullPointerException. Une pause demandee est donc toujours un
+                // arret propre, jamais une erreur du programme.
+                pauseRequested = false;
+                sendStopped(Simulator.Reason.PAUSE, Globals.exitCode);
             } else {
                 sendExecutionError(String.valueOf(e));
             }
@@ -448,6 +457,7 @@ public class RarsBridge {
             }
             int r = super.read();
             blockedOnInput = false;
+            armDeferredPause();
             return r;
         }
 
@@ -461,15 +471,38 @@ public class RarsBridge {
             }
             int r = super.read(b, off, len);
             blockedOnInput = false;
+            armDeferredPause();
             return r;
         }
     }
 
-    private static void simulatorPause() {
-        if (running) {
+    /** Une pause demandee pendant une lecture prend effet des l'entree recue. */
+    private static void armDeferredPause() {
+        if (pauseDeferred && !stopRequested) {
+            pauseDeferred = false;
+            pauseRequested = true;
             Simulator.getInstance().pauseExecution();
         }
     }
+
+    private static void simulatorPause() {
+        if (!running) {
+            return;
+        }
+        if (blockedOnInput) {
+            // Le simulateur est bloque dans une lecture (syscall 5/8/12) :
+            // interrompre maintenant casse l'execution (simulatorThread mis a
+            // null par RARS). On arme la pause : elle prendra effet des que
+            // l'utilisateur aura repondu dans la console.
+            pauseDeferred = true;
+            return;
+        }
+        pauseRequested = true;
+        Simulator.getInstance().pauseExecution();
+    }
+
+    private static volatile boolean pauseRequested = false;
+    private static volatile boolean pauseDeferred = false;
 
     private static volatile boolean stopRequested = false;
 
@@ -497,6 +530,7 @@ public class RarsBridge {
     private static void requestStop() {
         if (running) {
             stopRequested = true;
+            pauseDeferred = false;
             Simulator.getInstance().stopExecution();
             // Ferme le stdin : debloque une simulation bloquee dans une lecture.
             PipedOutputStream pipe = stdinPipe;

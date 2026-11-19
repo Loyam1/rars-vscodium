@@ -207,6 +207,9 @@ function webviewScript(): string {
   };
   document.getElementById("btn-cont").onclick = () => {
     if (running) {
+      if (waitingInput) {
+        statusEl.textContent = "pause prevue des que vous aurez repondu dans le terminal « RARS (console) »";
+      }
       vs.postMessage({ command: "pause" });
     } else {
       running = true;

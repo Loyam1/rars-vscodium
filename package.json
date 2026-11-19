@@ -83,6 +83,11 @@
         "when": "rarsVscodium.sessionActive"
       },
       {
+        "command": "rarsVscodium.debugActiveFile",
+        "key": "f5",
+        "when": "!rarsVscodium.sessionActive && resourceExtname == .asm"
+      },
+      {
         "command": "rarsVscodium.debugStep",
         "key": "f10",
         "when": "rarsVscodium.sessionActive"
