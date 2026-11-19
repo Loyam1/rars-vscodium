@@ -47,6 +47,13 @@ export interface RegsEvent {
   type: "regs";
   /** Vrai quand la simulation est bloquee dans une lecture (syscall 5/8/12). */
   waitingInput?: boolean;
+  /** Vrai quand l'execution est cadencee (curseur de vitesse sous le max). */
+  throttled?: boolean;
+  /** Instruction courante (comme stopped), pour suivre la ligne en execution. */
+  pc?: number;
+  line?: number;
+  instruction?: string;
+  expanded?: string;
   registers: Record<string, number>;
   fp: Record<string, number>;
 }
@@ -70,6 +77,14 @@ export interface RarsErrorEvent {
   message: string;
 }
 
+export interface SpeedEvent {
+  type: "speed";
+  /** Position du curseur de vitesse RARS (0 = le plus lent, 40 = au max). */
+  index: number;
+  /** Table des vitesses RARS en inst/sec ; les dernieres valeurs = au max. */
+  table: number[];
+}
+
 export type RarsEvent =
   | AssembleOkEvent
   | AssembleErrorsEvent
@@ -79,7 +94,8 @@ export type RarsEvent =
   | RegsEvent
   | ExecutionErrorEvent
   | OutputEvent
-  | RarsErrorEvent;
+  | RarsErrorEvent
+  | SpeedEvent;
 
 /**
  * Process Java qui pilote RARS (assembleur, pas-a-pas, points d'arret).
@@ -157,6 +173,11 @@ export class RarsBridge implements vscode.Disposable {
 
   continueRun(): void {
     this.write("CONT");
+  }
+
+  /** Regle la vitesse d'execution continue (indice dans la table RARS). */
+  setSpeed(index: number): void {
+    this.write(`SPEED ${index}`);
   }
 
   pause(): void {

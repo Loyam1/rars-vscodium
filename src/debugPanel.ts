@@ -1,9 +1,10 @@
 import * as vscode from "vscode";
 
 interface PanelMessage {
-  command: "launch" | "continue" | "pause" | "stop" | "step" | "back" | "input" | "openLine";
+  command: "launch" | "continue" | "pause" | "stop" | "step" | "back" | "input" | "openLine" | "speed";
   text?: string;
   line?: number;
+  index?: number;
 }
 
 /**
@@ -66,6 +67,11 @@ export class RarsDebugPanel implements vscode.Disposable {
     this.postMessage({ type: "state", running, status: this.lastStatus });
   }
 
+  /** Position du curseur de vitesse et table des vitesses recues du pont. */
+  setSpeed(index: number, table: number[]): void {
+    this.postMessage({ type: "speed", index, table });
+  }
+
   update(
     event: {
       reason: string;
@@ -100,7 +106,8 @@ export class RarsDebugPanel implements vscode.Disposable {
   updateRegs(
     registers: Record<string, number>,
     fp: Record<string, number>,
-    waitingInput?: boolean
+    waitingInput?: boolean,
+    position?: { pc?: number; line?: number; instruction?: string; expanded?: string }
   ): void {
     const previous = this.lastRegisters;
     const next = { ...registers, ...fp };
@@ -111,7 +118,7 @@ export class RarsDebugPanel implements vscode.Disposable {
       }
     }
     this.lastRegisters = next;
-    this.postMessage({ type: "regs", registers, fp, changed, waitingInput });
+    this.postMessage({ type: "regs", registers, fp, changed, waitingInput, ...position });
   }
 
   private postMessage(message: unknown): void {
@@ -143,6 +150,10 @@ ${css}
     <button id="btn-back">Precedent</button>
     <span id="status"></span>
   </div>
+  <div class="speed">
+    <div id="speed-label">Vitesse : maximale (sans interaction)</div>
+    <input id="speed-slider" type="range" min="0" max="40" step="1" value="40" aria-label="Vitesse d'execution">
+  </div>
   <div id="current" class="current"></div>
   <h2>Registres entiers</h2>
   <div id="regs" class="grid"></div>
@@ -161,10 +172,14 @@ function mainStyle(): string {
   return `<style>
   :root { color-scheme: light dark; }
   body { font-family: sans-serif; font-size: 0.85em; margin: 8px; }
-  .toolbar { display: flex; gap: 6px; align-items: baseline; margin-bottom: 6px; }
+  .toolbar { display: flex; gap: 6px; align-items: baseline; margin-bottom: 6px; flex-wrap: wrap; }
   button { padding: 2px 10px; cursor: pointer; }
   button:disabled { opacity: 0.5; cursor: default; }
-  #status { margin-left: 8px; opacity: 0.8; }
+  #status { flex-basis: 100%; flex-shrink: 0; width: 100%; margin: 0; opacity: 0.8; }
+  .speed { margin: 2px 0 8px; }
+  #speed-label { text-align: center; margin: 0 0 2px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  #speed-slider { width: 100%; margin: 0; padding: 0; }
   .current { font-family: monospace; white-space: pre-wrap; min-height: 1.5em;
     background: rgba(255, 200, 0, 0.15); border-left: 3px solid rgba(255, 200, 0, 0.8);
     padding: 4px 8px; margin: 4px 0; visibility: hidden; }
@@ -231,6 +246,31 @@ function webviewScript(): string {
       refreshButtons();
     }
   };
+  // Curseur de vitesse d'execution : indices de la table native RARS
+  // (0 = 0.05 inst/sec le plus lent, dernier indice = vitesse maximale).
+  let speedTable = [];
+  let speedIndex = 40;
+  const speedSlider = document.getElementById("speed-slider");
+  const speedLabel = document.getElementById("speed-label");
+  function updateSpeedLabel() {
+    const speed = speedTable[speedIndex];
+    if (speed === undefined) {
+      return;
+    }
+    speedLabel.textContent = speed >= 40
+      ? "Vitesse maximale (sans interaction)"
+      : "Vitesse d'execution : " + speed + " inst/sec";
+  }
+  speedSlider.addEventListener("input", () => {
+    const index = parseInt(speedSlider.value, 10);
+    if (Number.isNaN(index) || index === speedIndex) {
+      return;
+    }
+    speedIndex = index;
+    updateSpeedLabel();
+    vs.postMessage({ command: "speed", index });
+  });
+
   // Noms ABI -> numero de registre xN (ordre RARS : zero ra sp gp tp t0 t1 t2 s0 s1 a0..a7 s2..s11 t3..t6)
   const INT_ORDER = ["zero","ra","sp","gp","tp","t0","t1","t2","s0","s1","a0","a1","a2","a3","a4","a5","a6","a7",
     "s2","s3","s4","s5","s6","s7","s8","s9","s10","s11","t3","t4","t5","t6"];
@@ -278,6 +318,16 @@ function webviewScript(): string {
   const statusEl = document.getElementById("status");
   window.addEventListener("message", (event) => {
     const m = event.data;
+    if (m.type === "speed") {
+      speedTable = m.table || [];
+      speedIndex = Math.max(0, Math.min(m.index ?? speedIndex, speedTable.length - 1));
+      speedSlider.min = 0;
+      speedSlider.max = speedTable.length - 1;
+      // Affectation programmatique : declenche pas d'evenement input.
+      speedSlider.value = speedIndex;
+      updateSpeedLabel();
+      return;
+    }
     if (m.type === "state") {
       running = m.running;
       terminated = false;
@@ -314,9 +364,15 @@ function webviewScript(): string {
       return;
     }
     if (m.type === "regs") {
-      // Rafraichissement periodique en execution continue : registres seulement.
+      // Rafraichissement periodique en execution continue : registres + ligne
+      // courante (afin de suivre l'execution comme en pas-a-pas).
       renderGrid(document.getElementById("regs"), m.registers, m.changed || {});
       renderGrid(document.getElementById("fp"), m.fp, m.changed || {});
+      if (m.pc !== undefined && m.instruction) {
+        currentEl.style.visibility = "visible";
+        currentEl.textContent = "PC " + fmtHex(m.pc) + "\\n" + m.instruction +
+          (m.expanded && m.expanded !== m.instruction ? "  =>  " + m.expanded : "");
+      }
       if (m.waitingInput === true) {
         waitingInput = true;
         statusEl.textContent = "en attente d'une entree : repondez dans le terminal « RARS (console) »";

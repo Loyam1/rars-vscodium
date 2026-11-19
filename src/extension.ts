@@ -115,6 +115,8 @@ class RarsSession implements vscode.Disposable {
   private readonly breakpoints = new Map<string, Set<number>>();
   private mainFile?: string;
   private pendingAutoContinue = false;
+  private pendingSpeedIndex?: number;
+  private lastRegsLine?: number;
   private validLines: Set<number> = new Set();
   private readonly outputChannel: vscode.OutputChannel;
   private readonly currentLineDecoration: vscode.TextEditorDecorationType;
@@ -159,6 +161,13 @@ class RarsSession implements vscode.Disposable {
           break;
         case "stop":
           this.bridge?.stop();
+          break;
+        case "speed":
+          // Meme sans pont actif : le reglage sera applique au prochain demarrage.
+          if (typeof message.index === "number") {
+            this.pendingSpeedIndex = message.index;
+            this.bridge?.setSpeed(message.index);
+          }
           break;
         case "input":
           // Gardée pour compat : l'entree du programme passe desormais par le
@@ -358,6 +367,7 @@ class RarsSession implements vscode.Disposable {
         break;
       case "stopped": {
         const terminated = TERMINATION_REASONS.has(event.reason);
+        this.lastRegsLine = undefined;
         this.panel.update({
           reason: event.reason,
           pc: event.pc,
@@ -383,7 +393,25 @@ class RarsSession implements vscode.Disposable {
         break;
       }
       case "regs":
-        this.panel.updateRegs(event.registers, event.fp, event.waitingInput);
+        this.panel.updateRegs(event.registers, event.fp, event.waitingInput, {
+          pc: event.pc,
+          line: event.line,
+          instruction: event.instruction,
+          expanded: event.expanded
+        });
+        // Execution cadencee : fait suivre la ligne courante dans l'editeur,
+        // comme pour un arret pas-a-pas.
+        if (
+          event.throttled &&
+          typeof event.line === "number" &&
+          event.line !== this.lastRegsLine
+        ) {
+          this.lastRegsLine = event.line;
+          void this.revealLine(event.line - 1, true);
+        }
+        if (!event.throttled) {
+          this.lastRegsLine = undefined;
+        }
         break;
       case "executionError":
         this.outputChannel.appendLine(`Erreur d'execution ligne ${event.line ?? "?"} : ${event.message}`);
@@ -404,6 +432,15 @@ class RarsSession implements vscode.Disposable {
         break;
       case "error":
         this.outputChannel.appendLine(`Pont : ${event.message}`);
+        break;
+      case "speed":
+        if (this.pendingSpeedIndex !== undefined && event.index !== this.pendingSpeedIndex) {
+          // Le pont vient de (re)demarrer avec sa vitesse par defaut : on
+          // restitue le reglage du curseur ; l'echo confirmera au panneau.
+          this.bridge?.setSpeed(this.pendingSpeedIndex);
+        } else {
+          this.panel.setSpeed(event.index, event.table);
+        }
         break;
     }
   }

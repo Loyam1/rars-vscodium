@@ -2,7 +2,15 @@
   "name": "rars-vscodium",
   "displayName": "RARS for VSCodium",
   "description": "Execute RISC-V assembly with RARS from VSCodium.",
-  "version": "0.0.1",
+  "version": "1.0.0",
+  "publisher": "Loyam1",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Loyam1/rars-vscodium.git"
+  },
+  "icon": "resources/icon.png",
+  "keywords": ["risc-v", "assembly", "rars", "debugger", "simulator"],
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -25,11 +33,13 @@
     "commands": [
       {
         "command": "rarsVscodium.runActiveFile",
-        "title": "RARS: Executer le fichier actif"
+        "title": "RARS: Executer le fichier actif",
+        "icon": "$(play)"
       },
       {
         "command": "rarsVscodium.openGui",
-        "title": "RARS: Ouvrir dans l'interface graphique"
+        "title": "RARS: Ouvrir dans l'interface graphique",
+        "icon": "$(window)"
       },
       {
         "command": "rarsVscodium.configureJar",
@@ -99,9 +109,64 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "rarsVscodium.runActiveFile",
+          "when": "resourceExtname == .asm",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rarsVscodium.openGui",
+          "when": "resourceExtname == .asm",
+          "group": "navigation@2"
+        },
+        {
+          "command": "rarsVscodium.debugActiveFile",
+          "when": "!rarsVscodium.sessionActive && resourceExtname == .asm",
+          "group": "navigation@3"
+        },
+        {
+          "command": "rarsVscodium.debugLaunch",
+          "when": "rarsVscodium.sessionActive",
+          "group": "navigation@3"
+        },
+        {
+          "command": "rarsVscodium.debugStep",
+          "when": "rarsVscodium.sessionActive",
+          "group": "navigation@4"
+        },
+        {
+          "command": "rarsVscodium.debugContinue",
+          "when": "rarsVscodium.sessionActive",
+          "group": "navigation@5"
+        },
+        {
+          "command": "rarsVscodium.debugBack",
+          "when": "rarsVscodium.sessionActive",
+          "group": "navigation@6"
+        },
+        {
+          "command": "rarsVscodium.debugPause",
+          "when": "rarsVscodium.sessionActive",
+          "group": "navigation@7"
+        },
+        {
+          "command": "rarsVscodium.debugStop",
+          "when": "rarsVscodium.sessionActive",
+          "group": "navigation@8"
+        }
+      ],
       "editor/context": [
         {
           "command": "rarsVscodium.toggleBreakpoint",
+          "when": "resourceExtname == .asm"
+        },
+        {
+          "command": "rarsVscodium.runActiveFile",
+          "when": "resourceExtname == .asm"
+        },
+        {
+          "command": "rarsVscodium.debugActiveFile",
           "when": "resourceExtname == .asm"
         }
       ]
