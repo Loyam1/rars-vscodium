@@ -21,7 +21,8 @@ export class RarsDebugPanel implements vscode.Disposable {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly send: (message: PanelMessage) => void
+    private readonly send: (message: PanelMessage) => void,
+    private readonly onClose?: () => void
   ) {}
 
   show(): void {
@@ -42,6 +43,7 @@ export class RarsDebugPanel implements vscode.Disposable {
     panel.webview.html = this.html(panel.webview);
     panel.onDidDispose(() => {
       this.panel = undefined;
+      this.onClose?.();
     });
     panel.webview.onDidReceiveMessage((m: PanelMessage) => {
       this.send(m);

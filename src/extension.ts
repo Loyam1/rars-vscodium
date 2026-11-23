@@ -182,7 +182,7 @@ class RarsSession implements vscode.Disposable {
           }
           break;
       }
-    });
+    }, () => this.endSession());
 
     vscode.window.onDidChangeActiveTextEditor(() => this.refreshBreakpointDecorations());
     vscode.workspace.onDidChangeTextDocument((e) => {
@@ -276,6 +276,17 @@ class RarsSession implements vscode.Disposable {
 
   stop(): void {
     this.bridge?.stop();
+  }
+
+  /**
+   * Fermeture du panneau de debogage = fin de la session : on ferme le pont
+   * (QUIT) pour que le contexte rarsVscodium.sessionActive retombe et que le
+   * bouton « Deboguer le fichier actif » reapparaisse.
+   */
+  private endSession(): void {
+    if (this.bridge?.alive) {
+      this.bridge.quit();
+    }
   }
 
   async toggleBreakpointAtCursor(): Promise<void> {
