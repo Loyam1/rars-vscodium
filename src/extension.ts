@@ -1,8 +1,11 @@
 import * as path from "node:path";
+import { spawn } from "node:child_process";
 import * as vscode from "vscode";
 import { RarsBridge, type RarsEvent } from "./rarsBridge";
 import { RarsDebugPanel } from "./debugPanel";
 import { RarsConsole } from "./rarsConsole";
+import { activeLabels, parseRegisterDefinitions, registerAsmLanguage, setExecutionPosition } from "./asmLanguage";
+import { RarsRunner, setBridgeResourcePath } from "./runner";
 
 const CONFIGURATION_SECTION = "rarsVscodium";
 
@@ -10,12 +13,16 @@ const TERMINATION_REASONS = new Set(["NORMAL_TERMINATION", "CLIFF_TERMINATION", 
 
 export function activate(context: vscode.ExtensionContext): void {
   const session = new RarsSession(context);
+  const runner = new RarsRunner();
+  setBridgeResourcePath(context.asAbsolutePath(path.join("resources", "bridge", "RarsBridge.java")));
+  registerAsmLanguage(context);
 
   context.subscriptions.push(
     session,
+    runner,
     vscode.commands.registerCommand("rarsVscodium.configureJar", configureJar),
-    vscode.commands.registerCommand("rarsVscodium.runActiveFile", () => runActiveFile(false)),
-    vscode.commands.registerCommand("rarsVscodium.openGui", () => runActiveFile(true)),
+    vscode.commands.registerCommand("rarsVscodium.runActiveFile", () => runner.run()),
+    vscode.commands.registerCommand("rarsVscodium.openGui", () => openGui()),
     vscode.commands.registerCommand("rarsVscodium.debugActiveFile", () => session.start()),
     vscode.commands.registerCommand("rarsVscodium.debugStep", () => session.step()),
     vscode.commands.registerCommand("rarsVscodium.debugContinue", () => session.continueRun()),
@@ -45,7 +52,11 @@ async function configureJar(): Promise<void> {
     .update("jarPath", choice[0].fsPath, vscode.ConfigurationTarget.Workspace);
 }
 
-async function runActiveFile(gui: boolean): Promise<void> {
+/**
+ * Interface graphique de RARS : processus Java detache, ses fenetres sont
+ * maitresses de leur propre sortie — pas de terminal a gerer.
+ */
+async function openGui(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     void vscode.window.showErrorMessage("Ouvrez un fichier assembleur RISC-V avant de lancer RARS.");
@@ -58,21 +69,14 @@ async function runActiveFile(gui: boolean): Promise<void> {
     return;
   }
 
-  const args = ["-jar", jarPath];
-  if (!gui) {
-    args.push("nc");
-  }
-  args.push(editor.document.uri.fsPath);
-
   const javaPath = vscode.workspace
     .getConfiguration(CONFIGURATION_SECTION)
     .get<string>("javaPath", "java");
-  const terminal = vscode.window.createTerminal({
-    name: gui ? "RARS (interface graphique)" : "RARS",
-    shellPath: javaPath,
-    shellArgs: args
+  const child = spawn(javaPath, ["-jar", jarPath, editor.document.uri.fsPath], {
+    detached: true,
+    stdio: "ignore"
   });
-  terminal.show();
+  child.unref();
 }
 
 async function getJarPath(): Promise<string | undefined> {
@@ -117,6 +121,10 @@ class RarsSession implements vscode.Disposable {
   private pendingAutoContinue = false;
   private pendingSpeedIndex?: number;
   private lastRegsLine?: number;
+  /** Ligne en cours d'execution (resout les etiquettes « t0="compteur" »). */
+  private executionLine?: number;
+  /** Derniere ligne pour laquelle les etiquettes ont ete poussees au panneau. */
+  private lastLabelsLine?: number;
   private validLines: Set<number> = new Set();
   private readonly outputChannel: vscode.OutputChannel;
   private readonly currentLineDecoration: vscode.TextEditorDecorationType;
@@ -190,6 +198,9 @@ class RarsSession implements vscode.Disposable {
         // Les lignes du fichier change ne sont plus fiables : l'utilisateur
         // reassemblera (ou la session le fera) avant de continuer le pas-a-pas.
         this.validLines = new Set();
+        // Etiquettes de registres : reflete immediatement les changements.
+        this.lastLabelsLine = undefined;
+        this.pushRegisterLabels();
       }
     });
   }
@@ -224,6 +235,9 @@ class RarsSession implements vscode.Disposable {
       this.outputChannel.show(true);
       this.console.message("Session de debogage fermee.");
       this.panel.status("pont arrete");
+      this.executionLine = undefined;
+      this.lastLabelsLine = undefined;
+      this.pushRegisterLabels();
       void vscode.commands.executeCommand("setContext", "rarsVscodium.sessionActive", false);
     });
     this.bridge = newBridge;
@@ -231,6 +245,9 @@ class RarsSession implements vscode.Disposable {
 
     this.mainFile = editor.document.uri.fsPath;
     this.validLines = new Set();
+    this.executionLine = undefined;
+    this.lastLabelsLine = undefined;
+    this.pushRegisterLabels();
     this.panel.show();
     this.panel.status("assemblage…");
     newBridge.assemble(this.mainFile);
@@ -336,6 +353,9 @@ class RarsSession implements vscode.Disposable {
         for (const line of this.breakpoints.get(this.mainFile ?? "") ?? []) {
           this.bridge?.toggleBreakpoint(line, true);
         }
+        // Les etiquettes se definissent a partir de la ligne d'entree.
+        this.executionLine = event.entryLine > 0 ? event.entryLine : undefined;
+        this.pushRegisterLabels();
         this.panel.status("assemble, pret (F5 = continuer)");
         this.outputChannel.appendLine(
           `Assemble : ${event.file} (entree ligne ${event.entryLine})`
@@ -379,6 +399,9 @@ class RarsSession implements vscode.Disposable {
       case "stopped": {
         const terminated = TERMINATION_REASONS.has(event.reason);
         this.lastRegsLine = undefined;
+        // Les etiquettes suivent la ligne d'arret (et s'effacent a la fin).
+        this.executionLine = terminated ? undefined : event.line ?? this.executionLine;
+        this.pushRegisterLabels();
         this.panel.update({
           reason: event.reason,
           pc: event.pc,
@@ -422,6 +445,11 @@ class RarsSession implements vscode.Disposable {
         }
         if (!event.throttled) {
           this.lastRegsLine = undefined;
+        }
+        // Etiquettes dynamiques : la ligne avance, les definitions se revelent.
+        if (typeof event.line === "number" && event.line !== this.executionLine) {
+          this.executionLine = event.line;
+          this.pushRegisterLabels();
         }
         break;
       case "executionError":
@@ -492,6 +520,34 @@ class RarsSession implements vscode.Disposable {
       [...lines].filter((line) => line <= editor.document.lineCount)
         .map((line) => new vscode.Range(line - 1, 0, line - 1, 0))
     );
+  }
+
+  /**
+   * Envoie au panneau les etiquettes de registres actives a la ligne
+   * d'execution : la derniere definition « t0="compteur" » placee a ou avant
+   * cette ligne. Met aussi a jour la position utilisee par les survols.
+   */
+  private pushRegisterLabels(): void {
+    setExecutionPosition(this.mainFile, this.executionLine);
+    if (this.executionLine !== undefined && this.executionLine === this.lastLabelsLine) {
+      return;
+    }
+    const labels: Record<string, string> = {};
+    if (this.mainFile && this.executionLine !== undefined) {
+      const document = vscode.workspace.textDocuments.find(
+        (d) => d.uri.fsPath === this.mainFile
+      );
+      if (document) {
+        for (const [register, label] of activeLabels(
+          parseRegisterDefinitions(document),
+          this.executionLine
+        )) {
+          labels[register] = label;
+        }
+      }
+    }
+    this.lastLabelsLine = this.executionLine;
+    this.panel.setLabels(labels);
   }
 
   private breakpointIconUri(): string {

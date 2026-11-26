@@ -4,16 +4,31 @@ Extension VSCodium qui lance des programmes RISC-V avec RARS.
 
 ## Statut
 
-Commandes d'execution du fichier `.asm` actif (terminal integre ou interface
-graphique de RARS), plus un mode debogage natif :
+Execution et debogage du fichier `.asm` actif :
 
+- « Executer le fichier actif » : assemble puis execute via le pont Java, les
+ sorties du programme s'affichent dans le terminal « RARS (execution) » ; les
+ reponses aux syscalls de lecture (5, 8, 12...) se tapent dans ce terminal,
+ Ctrl+C arrete l'execution ;
+- « Ouvrir dans l'interface graphique » : lance RARS en processus detache, ses
+ fenetres s'ouvrent independamment ;
 - affichage des registres entiers et virgule flottante dans un panneau webview,
  avec les valeurs modifiees mises en evidence ;
-- pas-a-pas instruction par instruction, reprise, pause, arret ;
+- pas-a-pas instruction par instruction, reprise, pause, arret, pas-a-pas
+ arriere (historique RARS) ;
 - points d'arret posables a la souris, avec marqueur dans la gouttiere ;
-- sortie du programme (stdout/stderr) capturee dans le panneau et le canal
+- sortie du programme (stdout/stderr) capturee dans le terminal et le canal
  de sortie « RARS » ;
-- surbrillance de la ligne courante dans l'editeur.
+- surbrillance de la ligne courante dans l'editeur ;
+- auto-completion des instructions RISC-V : n'insere que la commande, les
+ arguments attendus s'affichent en texte fantome tant qu'ils ne sont pas
+ ecrits, et le survol d'une commande montre son role et ses arguments ;
+- etiquettes de registres dynamiques : un commentaire
+ `li t0,0 # t0="compteur"` attache « compteur » a t0 pendant le debogage ;
+ la definition s'active quand l'execution atteint sa ligne, se met a jour a
+ chaque pas (avant comme arriere) et s'affiche en survol dans l'editeur et le
+ panneau. Les registres flottants sont couverts (`ft0`, `fs3`, `fa2` ou
+ `f0`-`f31`).
 
 Le mode debogage fonctionne via un pont Java (`resources/bridge/RarsBridge.java`)
 qui pilote directement l'API de `rars.jar` (assembleur RISCVprogram, simulateur
@@ -46,10 +61,9 @@ Dans les reglages VSCodium, renseignez :
 - `RARS: Arreter la session de debogage` — Maj+F5
 - `RARS: Basculer un point d'arret sur cette ligne` — clic droit dans l'editeur
 
-Limites connues : les syscalls d'entree (5, 8, 12...) lisent ce qui est tape dans
-le champ « Entree du programme » du panneau ; un point d'arret pose sur
-l'instruction de depart ne declenche qu'apres la premiere instruction (le
-simulateur de RARS verifie les points d'arret apres chaque instruction).
+Limites connues : un point d'arret pose sur l'instruction de depart ne
+declenche qu'apres la premiere instruction (le simulateur de RARS verifie les
+points d'arret apres chaque instruction).
 
 ## Developpement
 

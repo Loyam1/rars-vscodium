@@ -69,6 +69,11 @@ export class RarsDebugPanel implements vscode.Disposable {
     this.postMessage({ type: "state", running, status: this.lastStatus });
   }
 
+  /** Etiquettes de registres extraites des commentaires (« t0="compteur" »). */
+  setLabels(labels: Record<string, string>): void {
+    this.postMessage({ type: "labels", labels });
+  }
+
   /** Position du curseur de vitesse et table des vitesses recues du pont. */
   setSpeed(index: number, table: number[]): void {
     this.postMessage({ type: "speed", index, table });
@@ -279,6 +284,14 @@ function webviewScript(): string {
   const XNAMES = {};
   INT_ORDER.forEach((n, i) => { XNAMES[n] = "x" + i; });
 
+  // Etiquettes attachees aux registres par les commentaires du programme
+  // (« li t0,0 # t0="compteur" ») : affichees en survol de chaque registre.
+  let registerLabels = {};
+  // Dernier etat connu des registres : pour re-rendre la grille quand des
+  // etiquettes arrivent pendant l'execution (affichage dynamique).
+  let lastRegs = {};
+  let lastFp = {};
+
   function fmtHex(v) {
     return (v < 0 ? v + 4294967296 : v).toString(16).padStart(8, "0").toUpperCase();
   }
@@ -303,6 +316,13 @@ function webviewScript(): string {
       const label = document.createElement("span");
       label.className = "name";
       label.textContent = XNAMES[name] ? name + " (" + XNAMES[name] + ")" : name;
+      const userLabel = registerLabels[name] !== undefined ? registerLabels[name]
+        : (XNAMES[name] !== undefined ? registerLabels[XNAMES[name]] : undefined);
+      if (userLabel) {
+        // Etiquette uniquement en survol : ecrire le texte dans la cellule
+        // rendait les valeurs illisibles (« t0 (x5) : compteur 075BCD15… »).
+        cell.title = name + " = « " + userLabel + " »";
+      }
       const hex = document.createElement("span");
       hex.className = "val";
       hex.textContent = fmtHex(value);
@@ -320,6 +340,13 @@ function webviewScript(): string {
   const statusEl = document.getElementById("status");
   window.addEventListener("message", (event) => {
     const m = event.data;
+    if (m.type === "labels") {
+      registerLabels = m.labels || {};
+      // Re-rend immediatement les registres avec les nouvelles etiquettes.
+      renderGrid(document.getElementById("regs"), lastRegs, {});
+      renderGrid(document.getElementById("fp"), lastFp, {});
+      return;
+    }
     if (m.type === "speed") {
       speedTable = m.table || [];
       speedIndex = Math.max(0, Math.min(m.index ?? speedIndex, speedTable.length - 1));
@@ -341,6 +368,8 @@ function webviewScript(): string {
       running = false;
       terminated = !!m.terminated;
       waitingInput = false;
+      lastRegs = m.registers || {};
+      lastFp = m.fp || {};
       renderGrid(document.getElementById("regs"), m.registers, m.changed || {});
       renderGrid(document.getElementById("fp"), m.fp, m.changed || {});
       if (m.instruction) {
@@ -368,6 +397,8 @@ function webviewScript(): string {
     if (m.type === "regs") {
       // Rafraichissement periodique en execution continue : registres + ligne
       // courante (afin de suivre l'execution comme en pas-a-pas).
+      lastRegs = m.registers || {};
+      lastFp = m.fp || {};
       renderGrid(document.getElementById("regs"), m.registers, m.changed || {});
       renderGrid(document.getElementById("fp"), m.fp, m.changed || {});
       if (m.pc !== undefined && m.instruction) {
